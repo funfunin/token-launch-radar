@@ -22,6 +22,50 @@ import { buildDossier } from './vendor/makefun-board.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 
+/**
+ * The usage text for --help and -h: what the program reads, what it
+ * writes, and which knobs move either. It prints to stdout and the
+ * program exits 0, so `node main.ts --help` is a safe smoke test that
+ * never touches a snapshot or writes an output directory.
+ */
+const USAGE = `Token Radar (radar-2) — rank pre-token protocols by implied launch value.
+
+Usage:
+  node main.ts [--input <snapshot.json|directory>] [--output <dir>]
+  node main.ts --help
+
+Options:
+  --input <path>    Snapshot to read. A JSON file, or a directory holding
+                    snapshot.json. Default: /input (the sealed snapshot
+                    the grader mounts). In local runs this is usually
+                    ../input/snapshot.json from the kit.
+  --output <dir>    Directory to write into. Default: the value of
+                    MAKEFUN_OUTPUT_DIR, or /output when that is unset.
+                    Local runs usually set MAKEFUN_OUTPUT_DIR=out.
+  --help, -h        Print this usage and exit 0. No files are read or
+                    written.
+
+What it writes (all inside the output directory):
+  board.json        The ranked board: one row per clean pre-token
+                    protocol, with its implied value, its five-factor
+                    model breakdown, its risk flags and its farm plan.
+  data.js           The same board in the compact form the dashboard
+                    page reads, as window.RADAR.
+  dashboard/        A copy of this repository's dashboard/ page.
+  screenshots/      A copy of this repository's screenshots/ images.
+  dossier.json      The judge's dossier, built by vendor/makefun-board.ts
+                    from the dashboard and screenshots just written.
+
+The snapshot must hold at least one protocol; an empty snapshot is
+refused with exit code 2. The program needs Node 22 or later and the
+standard library only — nothing is installed and nothing is fetched.
+`;
+
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+  process.stdout.write(USAGE);
+  process.exit(0);
+}
+
 /** The scorer's own caps (reference/gate.json): the text cap shapes the bytes, the rest refuse. */
 const TEXT_MAX_BYTES = 65_536;
 const SCREENSHOT_CAPS = { max: 4, max_bytes: 524_288 };
@@ -44,6 +88,15 @@ if (!existsSync(inputFile)) {
 const out = arg('output', process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
 
 const snapshot = parseSnapshot(readFileSync(inputFile, 'utf8'));
+if (snapshot.protocols.length === 0) {
+  process.stderr.write(
+    `token radar: the snapshot at ${inputFile} holds no protocols at all: ` +
+      `there is nothing to score, so the board would be empty. ` +
+      `Pass a snapshot with at least one protocol (the sealed snapshot ` +
+      `holds 758) and run again.\n`,
+  );
+  process.exit(2);
+}
 const { board, radar } = buildRadar(snapshot);
 const issue = boardIssue(board, snapshot);
 if (issue !== null) {

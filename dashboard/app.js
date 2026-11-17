@@ -28,6 +28,158 @@
     if (days >= 365) return (days / 365).toFixed(1) + 'y';
     return Math.max(0, Math.round(days)) + 'd';
   }
+
+  // Risk flags, recomputed here only when a row arrives without them:
+  // the board's own risk array (from lib/model.ts riskFlags) is the
+  // source of truth, and this mirror exists so an older data.js, or a
+  // row pasted in by hand, still shows the same warnings. The cutoffs
+  // are the model's own: one chain, under 180 days, a seven-day fall
+  // past -20% or a rise past +50%, TVL at $5B or under $10M, and an
+  // age of three years with no token, or no age at all.
+  var RISK_CUTOFFS = { veryYoungDays: 180, fallingFastPct: -20, surgingPct: 50, hugeTvlUsd: 5e9, tinyTvlUsd: 1e7, longNoTokenDays: 1095 };
+  function riskFlagsFor(row) {
+    if (row.risk && Array.isArray(row.risk)) return row.risk.slice();
+    var flags = [];
+    var chains = row.chains || [];
+    if (chains.length === 0) flags.push('no-chain-data');
+    else if (chains.length === 1) flags.push('single-chain');
+    var age = row.age_days === null || row.age_days === undefined ? null : row.age_days;
+    if (age === null) flags.push('unknown-age');
+    else if (age < RISK_CUTOFFS.veryYoungDays) flags.push('very-young');
+    else if (age >= RISK_CUTOFFS.longNoTokenDays) flags.push('long-no-token');
+    if (row.change_7d === null || row.change_7d === undefined) flags.push('no-growth-data');
+    else if (row.change_7d < RISK_CUTOFFS.fallingFastPct) flags.push('falling-fast');
+    else if (row.change_7d > RISK_CUTOFFS.surgingPct) flags.push('surging');
+    if (row.tvl_usd >= RISK_CUTOFFS.hugeTvlUsd) flags.push('huge-tvl');
+    else if (row.tvl_usd < RISK_CUTOFFS.tinyTvlUsd) flags.push('tiny-tvl');
+    return flags;
+  }
+  function riskLabel(flag) {
+    var labels = {
+      'no-chain-data': 'No chain data',
+      'single-chain': 'Single chain',
+      'very-young': 'Very young',
+      'unknown-age': 'Unknown age',
+      'long-no-token': 'Long wait, no token',
+      'falling-fast': 'Falling fast',
+      'surging': 'Surging',
+      'huge-tvl': 'Huge TVL',
+      'tiny-tvl': 'Tiny TVL',
+      'no-growth-data': 'No growth data'
+    };
+    return labels[flag] || flag;
+  }
+  function riskExplanation(flag) {
+    var notes = {
+      'no-chain-data': 'The snapshot lists no chain, so where it runs is unknown.',
+      'single-chain': 'One chain carries all of the exposure.',
+      'very-young': 'Listed under 180 days ago, so there is little history to judge it by.',
+      'unknown-age': 'No listing date is recorded, so its age is estimated, not measured.',
+      'long-no-token': 'Listed for three years or more with no token, so a token may never come.',
+      'falling-fast': 'TVL fell more than 20% in the last seven days.',
+      'surging': 'TVL rose more than 50% in the last seven days, which is often hot money.',
+      'huge-tvl': 'TVL is $5B or more, so the implied value is concentrated in one large name.',
+      'tiny-tvl': 'TVL is under $10M, so exits can be thin and slippage is a real cost.',
+      'no-growth-data': 'No seven-day TVL change was reported, so recent momentum is unknown.'
+    };
+    return notes[flag] || 'An unusual figure in this protocol’s snapshot record.';
+  }
+  function riskLevelFor(flags) {
+    if (!flags || flags.length === 0) return 'clean';
+    if (flags.length >= 3 || flags.indexOf('falling-fast') >= 0) return 'high';
+    return 'watch';
+  }
+  function riskBadges(row) {
+    var flags = riskFlagsFor(row);
+    if (flags.length === 0) return el('span', { class: 'risk risk-clean', text: 'No flags' });
+    var level = riskLevelFor(flags);
+    var wrap = el('span', { class: 'risk-flags risk-' + level });
+    flags.forEach(function (flag) {
+      wrap.appendChild(el('span', { class: 'risk-badge', title: riskExplanation(flag), text: riskLabel(flag) }));
+    });
+    return wrap;
+  }
+
+  // CSV export: the board the reader is actually looking at — the current
+  // search, category, chain and scope filters, in the current sort order —
+  // as a plain CSV file, so it opens in any spreadsheet without a network
+  // call. A field that holds a comma, a quote or a line break is wrapped
+  // in double quotes and its quotes are doubled, which is the CSV rule.
+  function csvEscape(value) {
+    var text = value === null || value === undefined ? '' : String(value);
+    if (/[",\n\r]/.test(text)) return '"' + text.replace(/"/g, '""') + '"';
+    return text;
+  }
+  function boardCsv(list) {
+    var header = ['rank', 'slug', 'name', 'category', 'chains', 'tvl_usd', 'implied_value_usd', 'risk'];
+    var lines = [header.join(',')];
+    list.forEach(function (r) {
+      lines.push([
+        r.rank,
+        csvEscape(r.slug),
+        csvEscape(r.name),
+        csvEscape(r.category || ''),
+        csvEscape((r.chains || []).join('; ')),
+        r.tvl_usd,
+        r.implied_value_usd,
+        csvEscape(riskFlagsFor(r).join('; '))
+      ].join(','));
+    });
+    return lines.join('\r\n') + '\r\n';
+  }
+  function downloadBoardCsv() {
+    var list = sortedRows(rows());
+    var blob = new Blob([boardCsv(list)], { type: 'text/csv;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement('a');
+    link.href = url;
+    link.download = 'token-radar-board.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    return list.length;
+  }
+
+  // Copying text to the clipboard: the modern clipboard API first, and
+  // the old hidden-textarea selection trick when the API is missing or
+  // refuses, so the button works in older browsers too. It resolves to
+  // true when the text landed on the clipboard, false when it did not.
+  function copyTextToClipboard(text) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return copyWithTextarea(text); });
+    }
+    return Promise.resolve(copyWithTextarea(text));
+  }
+  function copyWithTextarea(text) {
+    var area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    var done = false;
+    try { done = document.execCommand('copy'); } catch (e) { done = false; }
+    document.body.removeChild(area);
+    return done;
+  }
+  function farmPlanText(row, steps) {
+    var lines = [];
+    lines.push(row.name + ' — farm plan (Token Radar, rank ' + row.rank + ')');
+    lines.push('Implied value ' + fmtUsd(row.implied_value_usd) + ' on TVL ' + fmtUsd(row.tvl_usd) + '.');
+    steps.forEach(function (step, i) { lines.push((i + 1) + '. ' + step); });
+    lines.push('Flags to watch: ' + (riskFlagsFor(row).join(', ') || 'none') + '.');
+    return lines.join('\n');
+  }
+  function copyFarmPlan(row, steps, button) {
+    var original = button.textContent;
+    copyTextToClipboard(farmPlanText(row, steps)).then(function (done) {
+      button.textContent = done ? 'Copied!' : 'Copy failed — select the steps';
+      button.disabled = true;
+      window.setTimeout(function () { button.textContent = original; button.disabled = false; }, 2000);
+    });
+  }
   // The model in one function: the page recomputes a row from the snapshot
   // figures and checks the number board.json carries, so the page's code
   // and the board's data are visibly the same arithmetic.
@@ -242,6 +394,12 @@
       el('div', { class: 'field' }, el('label', { for: 'chain', text: 'Chain' }), ch),
       el('div', { class: 'field' }, el('label', { for: 'scope', text: 'Scope' }), sc),
       el('div', { class: 'field' }, el('span', { class: 'sub', text: 'Token status' }), el('div', { class: 'tabs' }, pre, live)),
+      el('div', { class: 'field' }, el('span', { class: 'sub', text: 'Export the filtered board' }),
+        el('button', {
+          class: 'button csv-button', type: 'button', text: 'Download CSV',
+          onclick: function () { downloadBoardCsv(); },
+          title: 'Save the rows you are looking at — search, filters and sort included — as token-radar-board.csv'
+        })),
       el('span', { class: 'count', text: state.tab === 'pre-token' ? rows().length + ' rows shown' : DATA.live.length + ' live-token protocols' })
     );
   }
@@ -287,6 +445,7 @@
           el('div', { class: 'bar', 'aria-hidden': 'true' }, el('i', { style: 'width:' + Math.max(3, Math.round((r.implied_value_usd / max) * 100)) + '%' })),
           el('span', { class: 'num', text: fmtUsd(r.implied_value_usd) })
         )),
+        el('td', null, riskBadges(r)),
         el('td', null, el('span', { class: 'status', text: 'no token' }))
       );
       tbody.appendChild(tr);
@@ -302,6 +461,7 @@
             sortHeader('growth', '7d'),
             sortHeader('age', 'Age'),
             sortHeader('implied', 'Implied value'),
+            el('th', { scope: 'col', text: 'Risk' }),
             el('th', { scope: 'col', text: 'Token' })
           )),
           tbody
@@ -382,13 +542,26 @@
       el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(impliedOf(row, DATA.model)) + (impliedOf(row, DATA.model) === row.implied_value_usd ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price.' })
     ));
     dialog.appendChild(el('section', { class: 'detail-section' },
+      el('h3', { text: 'What to watch' }),
+      el('div', { class: 'risk-detail' }, riskBadges(row)),
+      el('p', { class: 'sub', text: 'Risk level: ' + riskLevelFor(riskFlagsFor(row)) + '. ' + (riskFlagsFor(row).length === 0 ? 'Nothing in the snapshot figures stands out for this protocol.' : 'These flags come from the snapshot figures alone — chains, age, seven-day TVL change and TVL size — and they never change the implied value above.') }),
+      el('ul', { class: 'risk-notes' }, riskFlagsFor(row).map(function (flag) {
+        return el('li', null, el('b', { text: riskLabel(flag) + ': ' }), riskExplanation(flag));
+      }))
+    ));
+    dialog.appendChild(el('section', { class: 'detail-section' },
       el('h3', { text: 'Farm plan' }),
       el('ol', { class: 'steps' }, steps.map(function (s) {
         var at = s.indexOf(' Cost: ');
         var action = at >= 0 ? s.slice(0, at) : s;
         var tail = at >= 0 ? s.slice(at + 1) : '';
         return el('li', null, el('b', { text: action }), el('span', { class: 'cost', text: tail }));
-      }))
+      })),
+      el('button', {
+        class: 'button copy-button', type: 'button', text: 'Copy farm plan',
+        onclick: function (e) { copyFarmPlan(row, steps, e.currentTarget); },
+        title: 'Copy this protocol’s six farm steps, with its implied value and risk flags, to the clipboard'
+      })
     ));
     if (typeof dialog.showModal === 'function') {
       if (!dialog.open) dialog.showModal();

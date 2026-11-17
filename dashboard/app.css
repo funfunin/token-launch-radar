@@ -146,6 +146,27 @@ tbody tr[data-selected="true"] { background: var(--accent-soft); }
   .spot { grid-template-columns: 1fr; }
   .field input { min-width: 0; width: 100%; }
 }
+/* Risk flags: small amber badges in the table, a fuller reading in the
+   detail dialog. A clean row gets a quiet green note instead of badges,
+   so the eye lands on the rows that need a second look. */
+.risk-flags { display: flex; flex-wrap: wrap; gap: 4px; max-width: 220px; }
+.risk-badge {
+  display: inline-block; padding: 2px 7px; border-radius: 999px;
+  background: #fdf0d5; color: #7a4a00; border: 1px solid #ecd9a8;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+.risk-high .risk-badge { background: #fbe3df; color: #8f2a1d; border-color: #f0c4bc; }
+.risk-clean {
+  display: inline-block; padding: 2px 7px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent);
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+.risk-detail { margin-bottom: var(--step-2); }
+.risk-notes { margin: var(--step-2) 0 0; padding-left: var(--step-5); display: grid; gap: var(--step-1); font-size: 13px; color: var(--muted); }
+.risk-notes b { color: var(--ink); font-weight: 600; }
+.csv-button, .copy-button { margin-top: var(--step-2); }
+.copy-button { width: 100%; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }

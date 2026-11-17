@@ -27,6 +27,12 @@
 // No protocol name is ever special-cased: the same function scores every
 // row. The dashboard recomputes the same five factors from the same figures,
 // so the page and board.json always agree.
+//
+// Beside the score, every row carries short risk flags from riskFlags:
+// single-chain exposure, a very young or unknown age, a fast TVL fall or
+// surge, and a TVL so large or so small that it changes how a farmer
+// should read the number. The flags are a reading aid only; they never
+// move the implied value, the rank, or the farm plan.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -110,6 +116,8 @@ export interface BoardRow {
     age_days: number | null;
   };
   farm_steps: string[];
+  /** Short risk flags, derived only from the snapshot figures by riskFlags. */
+  risk: string[];
 }
 
 /** The dashboard's compact view of one row, with farm plans generated in the page. */
@@ -129,6 +137,8 @@ export interface RadarRow {
   maturity_multiplier: number;
   category_multiplier: number;
   chain_multiplier: number;
+  /** Short risk flags, copied from the board row so the page never recomputes them. */
+  risk: string[];
 }
 
 /** A live-token protocol: it already trades, so the board shows the market's own value. */
@@ -208,6 +218,147 @@ export function categoryMultiplier(category: string | null): number {
 /** The multi-chain reach weight, from the chain count alone. */
 export function chainMultiplier(chains: string[]): number {
   return 1 + Math.min(Math.max(chains.length - 1, 0), 4) * 0.025;
+}
+
+/**
+ * The risk-flag cutoffs. They are thresholds on the snapshot's own figures,
+ * never on a name: a flag fires when the figure crosses the line, so two
+ * protocols with the same figures always carry the same flags.
+ */
+export const RISK_THRESHOLDS = {
+  /** A protocol younger than this many days is still proving it will last. */
+  veryYoungDays: 180,
+  /** A seven-day TVL fall steeper than this many per cent is falling fast. */
+  fallingFastPct: -20,
+  /** A seven-day TVL rise above this many per cent is a hot-money surge. */
+  surgingPct: 50,
+  /** A TVL at or above this many dollars is a concentration flag. */
+  hugeTvlUsd: 5_000_000_000,
+  /** A TVL below this many dollars is a thin-liquidity flag. */
+  tinyTvlUsd: 10_000_000,
+  /** An age at or above this many days with no token is a long-wait flag. */
+  longNoTokenDays: 1095,
+} as const;
+
+/**
+ * Short risk flags for one protocol, from the snapshot figures alone.
+ *
+ * Every flag is a plain reading of a figure the snapshot already carries:
+ * how many chains it runs on, how old its listing is, how its TVL moved
+ * in seven days, and how large its TVL is. Nothing here touches the
+ * implied value, the ranking, or the farm plan: a flagged protocol keeps
+ * exactly the score the five-factor model gives it, and the flags only
+ * tell a reader what to watch before farming it.
+ *
+ * The flags, in the order they are checked:
+ * - `no-chain-data` — the snapshot lists no chain at all.
+ * - `single-chain` — it runs on exactly one chain, so one chain's outage
+ *   or fee spike is the whole exposure.
+ * - `very-young` — listed under 180 days ago, so there is little history
+ *   to judge it by.
+ * - `unknown-age` — no listing date, so the age, and the maturity factor
+ *   built on it, is a guess (the model uses 365 days).
+ * - `long-no-token` — listed for three years or more and still no token,
+ *   so a token may simply never come.
+ * - `falling-fast` — TVL fell more than 20% in seven days.
+ * - `surging` — TVL rose more than 50% in seven days, which is often
+ *   hot money that leaves as fast as it arrived.
+ * - `huge-tvl` — TVL at or above $5B, so any position is a small fish in
+ *   a very large pool and the implied value is concentrated in one name.
+ * - `tiny-tvl` — TVL under $10M, so exits can be thin and slippage real.
+ * - `no-growth-data` — no seven-day change was reported at all.
+ */
+export function riskFlags(protocol: SnapshotProtocol, age: number | null): string[] {
+  const flags: string[] = [];
+  const chainCount = protocol.chains.length;
+  if (chainCount === 0) {
+    flags.push('no-chain-data');
+  } else if (chainCount === 1) {
+    flags.push('single-chain');
+  }
+  if (age === null) {
+    flags.push('unknown-age');
+  } else if (age < RISK_THRESHOLDS.veryYoungDays) {
+    flags.push('very-young');
+  } else if (age >= RISK_THRESHOLDS.longNoTokenDays) {
+    flags.push('long-no-token');
+  }
+  const change = protocol.change_7d;
+  if (change === null) {
+    flags.push('no-growth-data');
+  } else if (change < RISK_THRESHOLDS.fallingFastPct) {
+    flags.push('falling-fast');
+  } else if (change > RISK_THRESHOLDS.surgingPct) {
+    flags.push('surging');
+  }
+  if (protocol.tvl_usd >= RISK_THRESHOLDS.hugeTvlUsd) {
+    flags.push('huge-tvl');
+  } else if (protocol.tvl_usd < RISK_THRESHOLDS.tinyTvlUsd) {
+    flags.push('tiny-tvl');
+  }
+  return flags;
+}
+
+/** One flag's plain-language reading, for the detail view's risk section. */
+export function describeRisk(flag: string): string {
+  switch (flag) {
+    case 'no-chain-data':
+      return 'No chain is listed for this protocol, so where it runs is unknown.';
+    case 'single-chain':
+      return 'Runs on a single chain, so one chain carries all of the exposure.';
+    case 'very-young':
+      return 'Listed less than 180 days ago, so there is little history to judge it by.';
+    case 'unknown-age':
+      return 'No listing date is recorded, so its age is estimated, not measured.';
+    case 'long-no-token':
+      return 'Listed for three years or more with no token, so a token may never come.';
+    case 'falling-fast':
+      return 'TVL fell more than 20% in the last seven days.';
+    case 'surging':
+      return 'TVL rose more than 50% in the last seven days, which is often hot money.';
+    case 'huge-tvl':
+      return 'TVL is $5B or more, so the implied value is concentrated in one large name.';
+    case 'tiny-tvl':
+      return 'TVL is under $10M, so exits can be thin and slippage is a real cost.';
+    case 'no-growth-data':
+      return 'No seven-day TVL change was reported, so recent momentum is unknown.';
+    default:
+      return 'An unusual figure in this protocol\'s snapshot record.';
+  }
+}
+
+/**
+ * How much attention a flag list deserves: `clean` when there is nothing
+ * to flag, `watch` when one or two flags are present, and `high` when the
+ * list is long or carries a fast fall, which is the sharpest warning here.
+ */
+export function riskLevel(flags: string[]): 'clean' | 'watch' | 'high' {
+  if (flags.length === 0) return 'clean';
+  if (flags.length >= 3 || flags.includes('falling-fast')) return 'high';
+  return 'watch';
+}
+
+/**
+ * A whole-dollar amount as a reader would write it: `$1,234,567`, with no
+ * abbreviation to billions or millions, so a CSV or a copied figure keeps
+ * the exact number. Null, undefined and non-finite input read as `n/a`.
+ */
+export function formatUsd(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return 'n/a';
+  const sign = n < 0 ? '-' : '';
+  const whole = Math.round(Math.abs(n));
+  const grouped = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${sign}$${grouped}`;
+}
+
+/**
+ * A percentage with a sign and two decimals: `+12.34%`, `-20.00%`, `0.00%`.
+ * Null, undefined and non-finite input read as `n/a`, matching formatUsd.
+ */
+export function formatPct(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return 'n/a';
+  const sign = n > 0 ? '+' : '';
+  return `${sign}${n.toFixed(2)}%`;
 }
 
 /** The five factors and the implied value one protocol gets under `model`. */
@@ -296,6 +447,7 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
       age_days: s.age,
     },
     farm_steps: farmSteps(s.p, s.age).map(stepText),
+    risk: riskFlags(s.p, s.age),
   }));
 }
 
@@ -427,6 +579,7 @@ export function radarRow(row: BoardRow): RadarRow {
     maturity_multiplier: row.model.maturity_multiplier,
     category_multiplier: row.model.category_multiplier,
     chain_multiplier: row.model.chain_multiplier,
+    risk: row.risk,
   };
 }
 
