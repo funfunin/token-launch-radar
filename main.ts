@@ -1,4 +1,4 @@
-// Token Radar, radar-2 (Node 22, standard library only).
+// Token Radar, radar-2.1 (Node 22, standard library only).
 //
 // The program reads the sealed snapshot from /input/snapshot.json (or
 // --input <file|dir>), scores every clean pre-token protocol with the model
@@ -28,7 +28,7 @@ const here = fileURLToPath(new URL('.', import.meta.url));
  * program exits 0, so `node main.ts --help` is a safe smoke test that
  * never touches a snapshot or writes an output directory.
  */
-const USAGE = `Token Radar (radar-2) — rank pre-token protocols by implied launch value.
+const USAGE = `Token Radar (radar-2.1) — rank pre-token protocols by implied launch value.
 
 Usage:
   node main.ts [--input <snapshot.json|directory>] [--output <dir>]

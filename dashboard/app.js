@@ -1,4 +1,4 @@
-// Token Radar dashboard, radar-2. It reads window.RADAR (written beside
+// Token Radar dashboard, radar-2.1. It reads window.RADAR (written beside
 // dashboard/ by main.ts) and renders the ranked board, a filterable table,
 // a per-protocol detail view with the model's own five factors and the
 // protocol's farm plan, and a live-token view. No network: every byte it
@@ -9,7 +9,7 @@
   var DATA = window.RADAR;
   if (!DATA) return;
   var app = document.getElementById('board');
-  var state = { q: '', category: 'all', chain: 'all', scope: 'all', tab: 'pre-token', sort: 'implied', dir: -1, selected: null };
+  var state = { q: '', category: 'all', chain: 'all', scope: 'all', risk: 'all', tab: 'pre-token', sort: 'implied', dir: -1, selected: null };
 
   var usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
   function fmtUsd(n) {
@@ -17,6 +17,13 @@
     if (Math.abs(n) >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
     if (Math.abs(n) >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
     if (Math.abs(n) >= 1e3) return '$' + Math.round(n / 1e3) + 'K';
+    return usd.format(n);
+  }
+  // The exact figure behind an abbreviated one: `$1,234,567,890`. Used
+  // as the hover text of every abbreviated amount, so a reader can see
+  // the full number without the table growing a column for it.
+  function fmtUsdExact(n) {
+    if (n === null || n === undefined || !isFinite(n)) return 'n/a';
     return usd.format(n);
   }
   function fmtPct(n) {
@@ -88,6 +95,13 @@
     if (!flags || flags.length === 0) return 'clean';
     if (flags.length >= 3 || flags.indexOf('falling-fast') >= 0) return 'high';
     return 'watch';
+  }
+  // One number for sorting by risk: the level first, then how many flags
+  // the row carries, so the riskiest rows sort to the top of the board.
+  function riskScore(row) {
+    var flags = riskFlagsFor(row);
+    var level = riskLevelFor(flags);
+    return (level === 'high' ? 3 : level === 'watch' ? 2 : 1) * 10 + flags.length;
   }
   function riskBadges(row) {
     var flags = riskFlagsFor(row);
@@ -273,6 +287,56 @@
     ].map(stepText);
   }
 
+  // What drives one row's score, in plain words: the strongest factor
+  // above 1.0 is named first, and any factor pulling the score down is
+  // named after it, so the reader sees why this row sits where it does.
+  function driverSentence(row) {
+    var ups = [
+      ['seven-day growth', row.growth_multiplier],
+      ['maturity', row.maturity_multiplier],
+      ['category', row.category_multiplier],
+      ['chain reach', row.chain_multiplier]
+    ].filter(function (d) { return d[1] > 1; }).sort(function (a, b) { return b[1] - a[1]; });
+    var downs = [
+      ['seven-day growth', row.growth_multiplier],
+      ['maturity', row.maturity_multiplier],
+      ['category', row.category_multiplier]
+    ].filter(function (d) { return d[1] < 1; }).sort(function (a, b) { return a[1] - b[1]; });
+    var text = ups.length === 0
+      ? 'No factor lifts this score above its TVL base: the implied value is the base alone.'
+      : 'The biggest lift is ' + ups[0][0] + ' (x' + ups[0][1] + ').';
+    if (downs.length > 0) text += ' ' + downs[0][0][0].toUpperCase() + downs[0][0].slice(1) + ' pulls it back (x' + downs[0][1] + ').';
+    return text;
+  }
+  // One factor as a labelled bar: how far its multiplier sits from 1.0,
+  // up in green or down in red, on a scale of 0.8 either way.
+  function factorBar(label, mult) {
+    var delta = mult - 1;
+    var width = Math.min(100, Math.round(Math.abs(delta) / 0.8 * 100));
+    return el('div', { class: 'factor-row' },
+      el('span', { class: 'factor-label', text: label }),
+      el('div', { class: 'factor-track' }, el('i', { class: 'factor-fill ' + (delta >= 0 ? 'up' : 'down'), style: 'width:' + Math.max(delta === 0 ? 0 : 3, width) + '%' })),
+      el('span', { class: 'num factor-value ' + (delta > 0 ? 'pos' : delta < 0 ? 'neg' : ''), text: 'x' + mult })
+    );
+  }
+  function factorBars(row) {
+    var base = Math.max(1, Math.round(row.tvl_usd * DATA.model.base_multiple));
+    return el('div', { class: 'factor-bars' },
+      el('div', { class: 'factor-row' },
+        el('span', { class: 'factor-label', text: 'Base (TVL x 0.25)' }),
+        el('div', { class: 'factor-track' }, el('i', { class: 'factor-fill base', style: 'width:100%' })),
+        el('span', { class: 'num factor-value', text: fmtUsd(base) })
+      ),
+      factorBar('Growth', row.growth_multiplier),
+      factorBar('Maturity', row.maturity_multiplier),
+      factorBar('Category', row.category_multiplier),
+      factorBar('Chain reach', row.chain_multiplier)
+    );
+  }
+  function riskLevelPill(level) {
+    return el('span', { class: 'risk-level risk-level-' + level, text: level === 'clean' ? 'No flags' : level === 'high' ? 'High risk' : 'Watch' });
+  }
+
   function readHash() {
     var hash = window.location.hash.replace(/^#/, '');
     if (!hash) return;
@@ -282,6 +346,7 @@
     if (params.get('category')) state.category = params.get('category');
     if (params.get('chain')) state.chain = params.get('chain');
     if (params.get('scope')) state.scope = params.get('scope');
+    if (params.get('risk')) state.risk = params.get('risk');
   }
   function writeHash() {
     var params = new URLSearchParams();
@@ -289,6 +354,7 @@
     if (state.category !== 'all') params.set('category', state.category);
     if (state.chain !== 'all') params.set('chain', state.chain);
     if (state.scope !== 'all') params.set('scope', state.scope);
+    if (state.risk !== 'all') params.set('risk', state.risk);
     if (state.selected) params.set('p', state.selected);
     var next = params.toString();
     if (next) window.history.replaceState(null, '', '#' + next);
@@ -302,6 +368,7 @@
       if (state.chain !== 'all' && !(r.chains || []).includes(state.chain)) return false;
       if (state.scope === 'early' && r.tvl_usd >= DATA.floor_usd) return false;
       if (state.scope === 'watchlist' && r.tvl_usd < DATA.floor_usd) return false;
+      if (state.risk !== 'all' && riskLevelFor(riskFlagsFor(r)) !== state.risk) return false;
       if (!q) return true;
       var hay = [r.name, r.slug, r.category, (r.chains || []).join(' ')].join(' ').toLowerCase();
       return hay.indexOf(q) >= 0;
@@ -315,6 +382,7 @@
       else if (key === 'tvl') { av = a.tvl_usd; bv = b.tvl_usd; }
       else if (key === 'growth') { av = a.change_7d === null ? -Infinity : a.change_7d; bv = b.change_7d === null ? -Infinity : b.change_7d; }
       else if (key === 'age') { av = a.age_days === null ? Infinity : a.age_days; bv = b.age_days === null ? Infinity : b.age_days; }
+      else if (key === 'risk') { av = riskScore(a); bv = riskScore(b); }
       else { av = a.implied_value_usd; bv = b.implied_value_usd; }
       if (av < bv) return -state.dir;
       if (av > bv) return state.dir;
@@ -353,13 +421,17 @@
     var top = DATA.rows.slice(0, 3);
     return el('section', { class: 'spot' },
       top.map(function (r) {
-        return el('article', { class: 'spot-card', tabindex: '0', onclick: function () { openDetail(r.slug); }, onkeydown: function (e) { if (e.key === 'Enter') openDetail(r.slug); } },
-          el('span', { class: 'spot-rank', text: '#' + r.rank }),
+        return el('article', { class: 'spot-card' + (r.rank === 1 ? ' spot-first' : ''), tabindex: '0', onclick: function () { openDetail(r.slug); }, onkeydown: function (e) { if (e.key === 'Enter') openDetail(r.slug); } },
+          el('div', { class: 'spot-top' },
+            el('span', { class: 'spot-rank', text: '#' + r.rank }),
+            r.rank === 1 ? el('span', { class: 'spot-tag', text: 'Top pick' }) : null
+          ),
           el('h2', { text: r.name }),
           el('p', { class: 'sub', text: (r.category || 'Other') + ' on ' + (r.chains && r.chains.length ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain') }),
-          el('div', { class: 'spot-num' }, el('span', { text: 'Implied value' }), el('b', { class: 'num', text: fmtUsd(r.implied_value_usd) })),
-          el('div', { class: 'spot-num' }, el('span', { text: 'TVL' }), el('b', { class: 'num', text: fmtUsd(r.tvl_usd) })),
-          el('div', { class: 'spot-num' }, el('span', { text: '7-day growth' }), el('b', { class: 'num ' + (r.change_7d !== null && r.change_7d >= 0 ? 'pos' : 'neg'), text: fmtPct(r.change_7d) }))
+          el('div', { class: 'spot-num' }, el('span', { text: 'Implied value' }), el('b', { class: 'num', text: fmtUsd(r.implied_value_usd), title: fmtUsdExact(r.implied_value_usd) })),
+          el('div', { class: 'spot-num' }, el('span', { text: 'TVL' }), el('b', { class: 'num', text: fmtUsd(r.tvl_usd), title: fmtUsdExact(r.tvl_usd) })),
+          el('div', { class: 'spot-num' }, el('span', { text: '7-day growth' }), el('b', { class: 'num ' + (r.change_7d !== null && r.change_7d >= 0 ? 'pos' : 'neg'), text: fmtPct(r.change_7d) })),
+          el('div', { class: 'spot-risk' }, riskBadges(r))
         );
       })
     );
@@ -386,6 +458,13 @@
       el('option', { value: 'early', text: 'Early (below floor) only', selected: state.scope === 'early' ? 'selected' : null })
     );
     sc.addEventListener('change', function () { state.scope = sc.value; writeHash(); render(); });
+    var rk = el('select', { id: 'risk', 'aria-label': 'Filter by risk level' },
+      el('option', { value: 'all', text: 'All risk levels' }),
+      el('option', { value: 'clean', text: 'No flags', selected: state.risk === 'clean' ? 'selected' : null }),
+      el('option', { value: 'watch', text: 'Watch', selected: state.risk === 'watch' ? 'selected' : null }),
+      el('option', { value: 'high', text: 'High risk', selected: state.risk === 'high' ? 'selected' : null })
+    );
+    rk.addEventListener('change', function () { state.risk = rk.value; writeHash(); render(); });
     var pre = el('button', { type: 'button', 'aria-pressed': state.tab === 'pre-token' ? 'true' : 'false', text: 'Pre-token', onclick: function () { state.tab = 'pre-token'; render(); } });
     var live = el('button', { type: 'button', 'aria-pressed': state.tab === 'live' ? 'true' : 'false', text: 'Live token', onclick: function () { state.tab = 'live'; render(); } });
     return el('div', { class: 'controls' },
@@ -393,6 +472,7 @@
       el('div', { class: 'field' }, el('label', { for: 'category', text: 'Category' }), cat),
       el('div', { class: 'field' }, el('label', { for: 'chain', text: 'Chain' }), ch),
       el('div', { class: 'field' }, el('label', { for: 'scope', text: 'Scope' }), sc),
+      el('div', { class: 'field' }, el('label', { for: 'risk', text: 'Risk' }), rk),
       el('div', { class: 'field' }, el('span', { class: 'sub', text: 'Token status' }), el('div', { class: 'tabs' }, pre, live)),
       el('div', { class: 'field' }, el('span', { class: 'sub', text: 'Export the filtered board' }),
         el('button', {
@@ -408,7 +488,7 @@
     return el('th', { scope: 'col' },
       el('button', { type: 'button', onclick: function () { if (state.sort === key) state.dir = -state.dir; else { state.sort = key; state.dir = -1; } render(); } },
         label,
-        state.sort === key ? el('span', { 'aria-hidden': 'true', text: state.dir < 0 ? ' v' : ' ^' }) : null
+        state.sort === key ? el('span', { 'aria-hidden': 'true', text: state.dir < 0 ? ' ↓' : ' ↑' }) : null
       )
     );
   }
@@ -422,49 +502,69 @@
         el('button', { class: 'button primary', type: 'button', text: 'Clear filters', onclick: function () { state.q = ''; state.category = 'all'; state.chain = 'all'; state.scope = 'all'; writeHash(); render(); } })
       ));
     }
-    var max = list[0].implied_value_usd || 1;
+    // The bar scale is the board's own top value, never the filtered
+    // list's, so a bar means the same thing under every filter.
+    var max = DATA.rows.length > 0 ? DATA.rows[0].implied_value_usd : 1;
     var tbody = el('tbody');
     list.forEach(function (r) {
       var growth = r.change_7d === null ? 'n/a' : fmtPct(r.change_7d);
       var growthClass = r.change_7d === null ? '' : r.change_7d >= 0 ? 'pos' : 'neg';
+      var level = riskLevelFor(riskFlagsFor(r));
       var tr = el('tr', {
         'data-selected': state.selected === r.slug ? 'true' : 'false',
+        'data-top10': r.rank <= 10 ? 'true' : 'false',
+        'data-risk': level,
         tabindex: '0',
         onclick: function () { openDetail(r.slug); },
         onkeydown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(r.slug); } }
       },
-        el('td', { class: 'num', text: String(r.rank) }),
+        el('td', { class: 'num rank-cell' }, el('span', { class: 'rank-chip' + (r.rank <= 3 ? ' rank-top3' : r.rank <= 10 ? ' rank-top10' : ''), text: String(r.rank) })),
         el('td', null, el('div', { class: 'name' },
           el('b', { text: r.name }),
           el('span', { class: 'sub', text: (r.category || 'Other') + ' on ' + (r.chains && r.chains.length ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain') })
         )),
-        el('td', { class: 'num', text: fmtUsd(r.tvl_usd) }),
+        el('td', { class: 'num', text: fmtUsd(r.tvl_usd), title: fmtUsdExact(r.tvl_usd) }),
         el('td', { class: 'num ' + growthClass, text: growth }),
         el('td', { class: 'num', text: fmtAge(r.age_days) }),
         el('td', null, el('div', { class: 'implied' },
-          el('div', { class: 'bar', 'aria-hidden': 'true' }, el('i', { style: 'width:' + Math.max(3, Math.round((r.implied_value_usd / max) * 100)) + '%' })),
-          el('span', { class: 'num', text: fmtUsd(r.implied_value_usd) })
+          el('div', { class: 'bar', 'aria-hidden': 'true', title: fmtUsdExact(r.implied_value_usd) }, el('i', { style: 'width:' + Math.max(3, Math.round((r.implied_value_usd / max) * 100)) + '%' })),
+          el('span', { class: 'num', text: fmtUsd(r.implied_value_usd), title: fmtUsdExact(r.implied_value_usd) })
         )),
         el('td', null, riskBadges(r)),
         el('td', null, el('span', { class: 'status', text: 'no token' }))
       );
       tbody.appendChild(tr);
     });
-    return el('div', { class: 'panel' },
-      el('div', { class: 'table-wrap' },
-        el('table', null,
-          el('caption', { class: 'sub', text: 'Pre-token protocols, strongest implied value first. Select a row for its model and farm plan.' }),
-          el('thead', null, el('tr', null,
-            sortHeader('implied', 'Rank'),
-            sortHeader('name', 'Protocol'),
-            sortHeader('tvl', 'TVL'),
-            sortHeader('growth', '7d'),
-            sortHeader('age', 'Age'),
-            sortHeader('implied', 'Implied value'),
-            el('th', { scope: 'col', text: 'Risk' }),
-            el('th', { scope: 'col', text: 'Token' })
-          )),
-          tbody
+    // What the reader is looking at, in risk terms: the counts behind
+    // the badges, so a filtered view states its own risk mix at a glance.
+    var counts = { clean: 0, watch: 0, high: 0 };
+    list.forEach(function (r) { counts[riskLevelFor(riskFlagsFor(r))]++; });
+    return el('div', null,
+      el('div', { class: 'panel' },
+        el('div', { class: 'risk-summary' },
+          el('span', null, 'Showing ', el('b', { text: String(list.length) }), ' rows — '),
+          el('b', { class: 'risk-count-high', text: String(counts.high) }),
+          el('span', null, ' high risk, '),
+          el('b', { text: String(counts.watch) }),
+          el('span', null, ' watch, '),
+          el('b', { text: String(counts.clean) }),
+          el('span', null, ' no flags.')
+        ),
+        el('div', { class: 'table-wrap' },
+          el('table', null,
+            el('caption', { class: 'sub', text: 'Pre-token protocols, strongest implied value first. Select a row for its model and farm plan.' }),
+            el('thead', null, el('tr', null,
+              sortHeader('implied', 'Rank'),
+              sortHeader('name', 'Protocol'),
+              sortHeader('tvl', 'TVL'),
+              sortHeader('growth', '7d'),
+              sortHeader('age', 'Age'),
+              sortHeader('implied', 'Implied value'),
+              sortHeader('risk', 'Risk'),
+              el('th', { scope: 'col', text: 'Token' })
+            )),
+            tbody
+          )
         )
       )
     );
@@ -542,7 +642,15 @@
       el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(impliedOf(row, DATA.model)) + (impliedOf(row, DATA.model) === row.implied_value_usd ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price.' })
     ));
     dialog.appendChild(el('section', { class: 'detail-section' },
-      el('h3', { text: 'What to watch' }),
+      el('h3', { text: 'What drives this score' }),
+      el('p', { class: 'sub', text: driverSentence(row) }),
+      factorBars(row)
+    ));
+    dialog.appendChild(el('section', { class: 'detail-section' },
+      el('div', { class: 'section-head' },
+        el('h3', { text: 'What to watch' }),
+        riskLevelPill(riskLevelFor(riskFlagsFor(row)))
+      ),
       el('div', { class: 'risk-detail' }, riskBadges(row)),
       el('p', { class: 'sub', text: 'Risk level: ' + riskLevelFor(riskFlagsFor(row)) + '. ' + (riskFlagsFor(row).length === 0 ? 'Nothing in the snapshot figures stands out for this protocol.' : 'These flags come from the snapshot figures alone — chains, age, seven-day TVL change and TVL size — and they never change the implied value above.') }),
       el('ul', { class: 'risk-notes' }, riskFlagsFor(row).map(function (flag) {

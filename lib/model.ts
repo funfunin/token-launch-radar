@@ -15,7 +15,10 @@
 //   base       = tvl_usd x 0.25
 //   growth     = clamp(change_7d, -60, 120) per cent
 //   growthMult = 1 + (growth / 100) x 0.6
-//   maturity   = 0.7 + min(age_days, 1095) / 1095 x 0.3   (age unknown: 365)
+//   maturity   = 0.7 + min(age_days, 730) / 730 x 0.3   (age unknown: 365)
+//                Maturity saturates at two years: past that, age alone
+//                adds no launch likelihood, and the long-no-token flag
+//                already marks the downside of waiting three years.
 //   category   = a launch-likelihood weight for the protocol's category
 //                (Dexs, Lending, Risk Curators and Onchain Capital
 //                Allocators 1.10; Yield, RWA, CDP, Derivatives, Restaking
@@ -76,12 +79,12 @@ export const MODEL: ModelConstants = {
   growth_cap: 120,
   maturity_floor: 0.7,
   maturity_range: 0.3,
-  maturity_days: 1095,
+  maturity_days: 730,
   unknown_age_days: 365,
 };
 
 /** The model's version label: the dashboard names it. */
-export const MODEL_VERSION = 'radar-2';
+export const MODEL_VERSION = 'radar-2.1';
 
 /** A farm step: the action, what it costs, and how long it takes. */
 export interface FarmStep {
