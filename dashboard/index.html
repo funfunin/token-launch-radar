@@ -1,15 +1,70 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar: pre-token protocols ranked by implied value</title>
+<title>Token Launch Radar — radar-3.0</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<a class="skip" href="#board">Skip to the board</a>
-<main id="board" tabindex="-1" aria-busy="true"></main>
-<script src="../data.js"></script>
+<header>
+  <h1>Token Launch Radar</h1>
+  <p class="sub">178 protocols that record no token yet, ranked by what a token would be worth if their record stayed as it is. Model <strong>radar-3.0</strong> · snapshot 2026-11-14 · 40 on the watchlist, 138 early finds below the floor.</p>
+</header>
+
+<section id="model" class="card">
+  <h2>How the value is fitted</h2>
+  <p>Fitted on the 90 board-like live-token comparables in the sealed snapshot: log market cap on log TVL. TVL exponent 0.45, scale 3640, and the growth, maturity, category and chain multipliers at quarter strength. Out-of-sample MAE on log value 1.57 against V2's 1.73 — about an 11% cut in mean absolute log error, with ranking at least tied (Spearman +0.38 vs +0.37). The ranking is essentially V2's; the values are far more plausible.</p>
+  <p class="limit">Honest limit: the fit's residual spread is 2.03 log units, so a typical implied value is still off by a factor of about 4.6. Market cap is a noisy target — supply, float and vesting are not in the snapshot — and live caps are post-launch while this board predicts pre-token launches. An implied value is this radar's own claim, never a promise of what a token will be worth.</p>
+  <p class="formula">implied = round(3640 × TVL<sup>0.45</sup> × growth<sup>0.25</sup> × maturity<sup>0.25</sup> × category<sup>0.25</sup> × chains<sup>0.25</sup>)</p>
+</section>
+
+<section id="spotlight">
+  <h2>Top 3</h2>
+  <div id="spot-cards" class="spot-grid"></div>
+</section>
+
+<section class="card controls">
+  <label>Search <input id="q" type="search" placeholder="protocol or category" autocomplete="off"></label>
+  <label>Risk <select id="risk">
+    <option value="">All protocols</option>
+    <option value="f">Falling TVL (&lt; −10% in 7 days)</option>
+    <option value="y">Young (&lt; 180 days)</option>
+    <option value="s">Single chain</option>
+    <option value="u">Age unknown</option>
+  </select></label>
+  <label>Sort <select id="sort">
+    <option value="implied">Implied value</option>
+    <option value="tvl">TVL</option>
+    <option value="growth">7-day growth</option>
+    <option value="age">Age (oldest first)</option>
+  </select></label>
+  <span id="count"></span>
+</section>
+
+<section>
+  <h2>The board</h2>
+  <table id="board">
+    <thead><tr><th>#</th><th>Protocol</th><th>Category</th><th>Chains</th><th>TVL</th><th>7d</th><th>Age</th><th>Implied value</th><th>Score drivers</th><th>Risk</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</section>
+
+<section id="detail" class="card"></section>
+
+<section>
+  <h2>Live tokens: what the model is fitted on</h2>
+  <p class="sub">The 24 largest live-token protocols by market cap. The same V3 formula is applied to each, so you can see where the model tracks real caps and where it misses. These are not farm targets — their tokens already trade.</p>
+  <table id="live">
+    <thead><tr><th>Protocol</th><th>TVL</th><th>Market cap</th><th>V3 implied</th><th>Implied / cap</th></tr></thead>
+    <tbody id="live-rows"></tbody>
+  </table>
+</section>
+
+<footer>
+  <p>Source: DefiLlama protocols, fetched 2026-11-14. The snapshot carries no ranking, no implied value and no farm plan — deriving them is this entry's work. A protocol is listed as recording no token when its DefiLlama record carries none; that is not proof it has none. Nothing here is financial advice.</p>
+</footer>
+<script src="data.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
