@@ -6,9 +6,9 @@ reader how to farm each one. 178 rows on the sealed snapshot of
 2026-11-14: the 40 protocols on the watchlist, plus 138 early finds
 below the $50M floor.
 
-[![token-radar-01](https://make.fun/badge/token-radar-01/funfunin/token-launch-radar.svg)](https://make.fun/bounty/token-radar-01)
-[![rank](https://make.fun/badge/token-radar-01/funfunin/token-launch-radar/rank.svg)](https://make.fun/bounty/token-radar-01)
-[![reward](https://make.fun/badge/token-radar-01/funfunin/token-launch-radar/reward.svg)](https://make.fun/bounty/token-radar-01)
+[![make.fun · token-radar-01](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![rank](https://make.fun/badge/token-radar-01/funfunin/token-launch-radar/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![reward](https://make.fun/badge/token-radar-01/funfunin/token-launch-radar/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 
 ## The model: radar-3.0
 
